@@ -36,19 +36,19 @@ func doWorkReusable(mutex, barrierEntry, barrierLeave *CondSemaphore, thread int
 	barrierLeave.Signal()
 }
 
-func main() {
-	workers := 4
-	arrived := workers
-	wg := sync.WaitGroup{}
-	m := NewCondSemaphore(1)
-	barrierEntry := NewCondSemaphore(0)
-	barrierLeave := NewCondSemaphore(1)
-	for k := 0; k < 3; k++ {
-		fmt.Printf("starting iteration %d\n", k)
-		wg.Add(workers)
-		for i := 0; i < workers; i++ {
-			go doWorkReusable(m, barrierEntry, barrierLeave, i, &wg, &arrived, workers)
-		}
-		wg.Wait()
-	}
-}
+//func main() {
+//	workers := 4
+//	arrived := workers
+//	wg := sync.WaitGroup{}
+//	m := NewCondSemaphore(1)
+//	barrierEntry := NewCondSemaphore(0)
+//	barrierLeave := NewCondSemaphore(1)
+//	for k := 0; k < 3; k++ {
+//		fmt.Printf("starting iteration %d\n", k)
+//		wg.Add(workers)
+//		for i := 0; i < workers; i++ {
+//			go doWorkReusable(m, barrierEntry, barrierLeave, i, &wg, &arrived, workers)
+//		}
+//		wg.Wait()
+//	}
+//}

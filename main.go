@@ -6,50 +6,122 @@ import (
 	"sync"
 )
 
-func prepare() {}
+var test chan byte
 
-func doWork(mutex, barrierEntry, barrierLeave *primitives.CondSemaphore, thread int, wg *sync.WaitGroup, arrived *int, workers int) {
+type RWMutex struct {
+	people                      int
+	roomEmpty, readTurnstile, m *primitives.CondSemaphore
+}
+
+func NewRWMutex() *RWMutex {
+	return &RWMutex{
+		roomEmpty:     primitives.NewCondSemaphore(1),
+		readTurnstile: primitives.NewCondSemaphore(1),
+		m:             primitives.NewCondSemaphore(1),
+	}
+}
+
+func (rwm *RWMutex) Wait() {
+	rwm.readTurnstile.Wait() //avoids new readers from entering the room
+	rwm.roomEmpty.Wait()     //waits for last reader to leave
+}
+
+func (rwm *RWMutex) Signal() {
+	rwm.readTurnstile.Signal() //allows readers to pass through entry or next writer to snatch
+	rwm.roomEmpty.Signal()     //writer leaves room
+}
+
+func (rwm *RWMutex) RWait() {
+	rwm.readTurnstile.Wait()   //waits for turnstile to open
+	rwm.readTurnstile.Signal() //allows next reader to go through or writer to snatch the entry lock
+	rwm.incrementLightSwitch() //incs counter of readers inside room. if writer is there, gets blocked by roomEmpty
+}
+
+func (rwm *RWMutex) RSignal() {
+	rwm.decrementLightSwitch() //reader leaves room
+}
+
+func (rwm *RWMutex) incrementLightSwitch() {
+	rwm.m.Wait()
+	rwm.people += 1
+	if rwm.people == 1 {
+		rwm.roomEmpty.Wait()
+	}
+	rwm.m.Signal()
+}
+
+func (rwm *RWMutex) decrementLightSwitch() {
+	rwm.m.Wait()
+	rwm.people -= 1
+	if rwm.people == 0 {
+		rwm.roomEmpty.Signal()
+	}
+	rwm.m.Signal()
+}
+
+func reader(wg *sync.WaitGroup, i int, m *RWMutex) {
 	defer wg.Done()
-	prepare()
-	//must unlock enter barrier before coming in here
-	//can only enter when all threads have prepared
-	mutex.Wait()
-	*arrived -= 1
-	if *arrived == 0 {
-		barrierEntry.Signal()
-		barrierLeave.Wait() //we end up with 1 extra signal after all threads did their work and come back here
-	}
-	mutex.Signal()
+	m.RWait()
+	fmt.Printf("{")
+	fmt.Printf("}")
+	m.RSignal()
+}
 
-	barrierEntry.Wait()
-	barrierEntry.Signal()
-	fmt.Printf("Thread %d starting \n", thread)
-	mutex.Wait()
-	*arrived += 1
-	if *arrived == workers {
-		fmt.Printf("unlocking barrier at thread %d \n", thread)
-		barrierLeave.Signal()
-		barrierEntry.Wait() //we end up with 1 extra signal when all threads leave prepare
+func writer(wg *sync.WaitGroup, i int, m *RWMutex) {
+	defer wg.Done()
+	m.Wait()
+	fmt.Printf("(")
+	fmt.Printf(")")
+	m.Signal()
+}
+
+func validator() {
+	openKey := 0
+	openParens := 0
+	ans := true
+	for range test {
+		letter := <-test
+		switch letter {
+		case '(':
+			openParens += 1
+			if openKey > 0 {
+				ans = false
+			}
+
+		case ')':
+			openParens -= 1
+
+		case '{':
+			openKey += 1
+			if openParens > 0 {
+				ans = false
+			}
+
+		case '}':
+			openKey -= 1
+
+		}
+		fmt.Println(ans)
 	}
-	mutex.Signal()
-	barrierLeave.Wait()
-	fmt.Printf("Thread %d working \n", thread)
-	barrierLeave.Signal()
 }
 
 func main() {
-	workers := 4
-	arrived := workers
+	test = make(chan byte)
+	readers := 1000000
+	writers := 1000000
+	rwm := NewRWMutex()
 	wg := sync.WaitGroup{}
-	m := primitives.NewCondSemaphore(1)
-	barrierEntry := primitives.NewCondSemaphore(0)
-	barrierLeave := primitives.NewCondSemaphore(1)
-	for k := 0; k < 3; k++ {
-		fmt.Printf("starting iteration %d\n", k)
-		wg.Add(workers)
-		for i := 0; i < workers; i++ {
-			go doWork(m, barrierEntry, barrierLeave, i, &wg, &arrived, workers)
-		}
-		wg.Wait()
+	go validator()
+	for i := 0; i < writers; i++ {
+		wg.Add(1)
+		go writer(&wg, i, rwm)
 	}
+	for i := 0; i < readers; i++ {
+		wg.Add(1)
+		go reader(&wg, i, rwm)
+	}
+
+	wg.Wait()
+	close(test)
+
 }
